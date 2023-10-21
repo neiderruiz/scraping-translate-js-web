@@ -1,40 +1,68 @@
 import express from 'express';
 import fetch from 'cross-fetch';
-import request from 'request-promise';
-import cheerio  from 'cheerio';
+import cheerio from 'cheerio';
+import puppeteer from 'puppeteer';
+
 globalThis.fetch = fetch
 const app = express();
 const port = 3000
+app.use(express.static('public'));
+app.use(express.json());
 
-app.get('/', async (req, res) => {
-  res.send('Hello World!')
-  const $ = await request('https://www.ingles.com/traductor/como estas?',{
-    transform: body =>  cheerio.load(body)
-  })
-  console.log($('title').html())
-  console.log($('#quickdef1-es').html())
-  console.log($('h1').html())
-  console.log($('._3olXdKlz').html())
-  return true;
-  const r = await fetch('https://www.abc.es/frontalajax/traductor/traducir/',
-  {
-    cors: 'no-cors',
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Accept': 'application/json, text/javascript, */*; q=0.01',
-      'Origin': 'https://www.abc.es',
-      'Referer': 'https://www.abc.es/traductor/',
-      'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Safari/537.36',
-      'X-Requested-With': 'XMLHttpRequest',
-  },
-  body: 'texto_traducir=good morning?&source_lang=en&target_lang=es&npage=1&json=1&nrows=20'
-  })
-  console.log(r)
-  const n = await r.json()
-  console.log(n)
-})
+
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/public/index.html');
+});
+
+
+app.post('/translate', async (req, res) => {
+  try {
+    const text = req.body.text;
+
+    const browser = await puppeteer.launch({ headless: 'new' });
+
+    const page = await browser.newPage();
+
+    let attempts = 0;
+    const maxAttempts = 3;
+    let success = false;
+
+    while (attempts < maxAttempts && !success) {
+      attempts++;
+      try {
+        await page.goto(`https://www.ingles.com/traductor/${text}`, { waitUntil: 'networkidle0', timeout: 15000 });
+        success = true; 
+      } catch (error) {
+        console.error(`Navigation error on attempt ${attempts}:`, error);
+        if (attempts < maxAttempts) {
+          console.log(`Retrying... (${attempts}/${maxAttempts})`);
+        }
+      }
+    }
+
+    const content = await page.content();
+    const $ = cheerio.load(content);
+
+    let result = $('#quickdef1-es').text();
+
+    if (!result) {
+      result = $('.wI9gejVx').text();
+    }
+
+    // Crear un objeto JSON con los datos
+    const responseData = {
+      result,
+    };
+
+    await browser.close();
+
+    return res.json(responseData);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Server Error');
+  }
+});
+
 
 
 app.listen(port, () => {
